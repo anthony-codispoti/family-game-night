@@ -1,11 +1,7 @@
-// Talks to Supabase. Only the public "anon" key is used here; the database
-// only lets it call the api_* functions, which check the room code + token.
-import { createClient } from '@supabase/supabase-js';
+// Talks to our Vercel functions (/api/rpc, /api/wait). The browser never
+// sees a database password; the server only runs allow-listed api_* calls.
 
-const URL = import.meta.env.VITE_SUPABASE_URL;
-const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
-export const configured = Boolean(URL && KEY);
-export const sb = configured ? createClient(URL, KEY, { auth: { persistSession: false } }) : null;
+export const configured = true;
 
 const ERRORS = {
   ROOM_NOT_FOUND: "Can't find that room. Check the code?",
@@ -22,18 +18,23 @@ const ERRORS = {
   ROOM_FULL: 'This room is full.',
   WRONG_PHASE: 'Too late — the game moved on.',
   TOO_LATE_TO_SKIP: 'Too late to skip this one.',
+  NO_DATABASE: "The database isn't connected yet (Vercel → Storage → Neon).",
+  SERVER_ERROR: 'The server hiccuped. Try again.',
+  OFFLINE: 'You seem to be offline.',
 };
 export class GameError extends Error {
   constructor(code) { super(ERRORS[code] || code); this.code = code; }
 }
 
 export async function call(fn, args = {}) {
-  const { data, error } = await sb.rpc(fn, args);
-  if (error) {
-    const code = (error.message || '').trim();
-    throw new GameError(ERRORS[code] ? code : (navigator.onLine ? code : 'You seem to be offline.'));
-  }
-  return data;
+  let res;
+  try {
+    res = await fetch('/api/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fn, args }) });
+  } catch { throw new GameError('OFFLINE'); }
+  let body = {};
+  try { body = await res.json(); } catch {}
+  if (!res.ok) throw new GameError((body.error || 'SERVER_ERROR').trim());
+  return body.data;
 }
 
 // ---- this device's identity (survives refresh) ----
@@ -46,26 +47,36 @@ export const session = {
   lastName() { try { return localStorage.getItem(KEY_NAME) || ''; } catch { return ''; } },
 };
 
-// ---- live sync: Realtime ping + polling fallback ----
+// ---- live sync: ask the server to tell us when the room changes ----
+// Pauses while the app is in the background, and slows down after 30 idle
+// minutes, so a forgotten open tab doesn't keep the database awake.
 export function watchRoom(code, onChange) {
-  let channel = null, stopped = false, lastVersion = null, timer = null;
-  const check = async () => {
-    try {
-      const v = await call('api_version', { p_code: code });
-      if (v !== lastVersion) { lastVersion = v; onChange(); }
-    } catch {}
-  };
-  if (sb) {
-    channel = sb.channel('room-' + code, { config: { private: false } })
-      .on('broadcast', { event: 'changed' }, () => onChange())
-      .subscribe();
-  }
-  const loop = () => { if (stopped) return; timer = setTimeout(async () => { await check(); loop(); }, document.hidden ? 6000 : 2500); };
-  loop();
-  const vis = () => { if (!document.hidden) onChange(); };
+  let stopped = false, known = '', ctrl = null, lastChange = Date.now();
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const visible = () => new Promise((r) => {
+    if (!document.hidden) return r();
+    const on = () => { if (!document.hidden) { document.removeEventListener('visibilitychange', on); r(); } };
+    document.addEventListener('visibilitychange', on);
+  });
+  (async () => {
+    while (!stopped) {
+      await visible();
+      if (stopped) break;
+      if (Date.now() - lastChange > 30 * 60 * 1000) await sleep(20000);
+      try {
+        ctrl = new AbortController();
+        const r = await fetch(`/api/wait?code=${encodeURIComponent(code)}&v=${encodeURIComponent(known)}`, { signal: ctrl.signal, cache: 'no-store' });
+        const j = await r.json();
+        if (!r.ok) { await sleep(2000); continue; }
+        if (j.gone) { onChange(); await sleep(3000); continue; }
+        if (j.v != null && String(j.v) !== known) { known = String(j.v); lastChange = Date.now(); onChange(); }
+      } catch { if (!stopped) await sleep(2000); }
+    }
+  })();
+  const vis = () => { if (!document.hidden) { lastChange = Date.now(); onChange(); } };
   document.addEventListener('visibilitychange', vis);
   return {
-    setVersion(v) { lastVersion = v; },
-    stop() { stopped = true; clearTimeout(timer); document.removeEventListener('visibilitychange', vis); if (channel) sb.removeChannel(channel); },
+    setVersion(v) { known = String(v); },
+    stop() { stopped = true; ctrl?.abort(); document.removeEventListener('visibilitychange', vis); },
   };
 }

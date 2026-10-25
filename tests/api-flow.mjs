@@ -1,21 +1,20 @@
-// Full-round test against Supabase using only the public (anon) key.
-import { createClient } from '@supabase/supabase-js';
+// Full-round test through the public API, plus security checks.
+// Talks to the app's /api endpoints exactly like the browser does.
 import fs from 'node:fs';
-const URL = process.env.SB_URL, KEY = process.env.SB_KEY;
-const sb = createClient(URL, KEY);
+const BASE = process.env.BASE || 'http://localhost:4173';
+const post = async (fn, args) => { const r = await fetch(BASE + '/api/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fn, args }) }); const j = await r.json(); return r.ok ? { data: j.data } : { error: { message: j.error } }; };
+const sb = { rpc: post };
 const bank = JSON.parse(fs.readFileSync(new globalThis.URL('../src/games/who-said-it/questions.json', import.meta.url)));
 let fails = 0;
 const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails++; };
 const rpc = async (fn, args) => { const { data, error } = await sb.rpc(fn, args); if (error) throw new Error(error.message); return data; };
 const tryRpc = async (fn, args) => { const { error } = await sb.rpc(fn, args); return error?.message || null; };
 
-// security: no direct table access
-for (const t of ['rooms','players','submissions','rounds','questions','scores']) {
-  const { data, error } = await sb.from(t).select('*').limit(1);
-  ok(error || (data && data.length === 0), `direct read of ${t} blocked`);
+// security: only allow-listed functions can be called
+for (const fn of ['game_who_said_it_view', '_pick_question', '_standings', 'pg_sleep']) {
+  ok((await tryRpc(fn, {})) === 'UNKNOWN_FUNCTION', `${fn} not callable from the browser`);
 }
-ok(await tryRpc('game_who_said_it_view', { p_round: '00000000-0000-0000-0000-000000000000', p_player: '00000000-0000-0000-0000-000000000000' }), 'internal game function not callable');
-ok(await tryRpc('_pick_question', { p_game: 'who_said_it' }), 'internal helper not callable');
+ok((await (await fetch(BASE + '/api/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fn: 'api_state', args: { p_code: 'ABCD', p_token: "x'); drop table rooms; --" } }) })).json()).error === 'NOT_IN_ROOM', 'injection attempt rejected');
 
 const host = await rpc('api_create_room', { p_name: 'Dad', p_game: 'who_said_it', p_bank: bank });
 ok(/^[A-Z]{4}$/.test(host.code), 'room code ' + host.code);
@@ -88,10 +87,18 @@ await rpc('api_start_round', { p_code: code, p_token: P.Dad.token });
 for (let i = 0; i < 30; i++) { s = await st('Dad'); seen.add(s.round.question); await rpc('api_action', { p_code: code, p_token: P.Dad.token, p_action: 'skip' }); }
 ok(seen.size === 30, '30 skips, 30 unique questions');
 
+// family questions come up often, but never back-to-back
+await rpc('api_add_question', { p_code: code, p_token: P.Valentino.token, p_category: 'funny', p_text: 'What would your robot sidekick be called?' });
+const picks = [];
+for (let i = 0; i < 60; i++) { await rpc('api_action', { p_code: code, p_token: P.Dad.token, p_action: 'skip' }); picks.push((await st('Dad')).round.question); }
+const famIdx = picks.map((q, i) => (q === 'What would your robot sidekick be called?' ? i : -1)).filter((i) => i >= 0);
+ok(famIdx.length >= 1 && famIdx.length <= 3 && famIdx.every((v, i) => i === 0 || v - famIdx[i - 1] > 20), `family question asked ${famIdx.length}x in 60 picks, spaced >20 apart (at ${famIdx.join(', ')})`);
+ok(famIdx[0] < 15, 'new family question comes up soon (pick #' + (famIdx[0] + 1) + ')');
+
 // family question
-await rpc('api_add_question', { p_code: code, p_token: P.Gio.token, p_category: 'funny', p_text: 'What is the weirdest sound your stomach has made?' });
+await rpc('api_add_question', { p_code: code, p_token: P.Gio.token, p_category: 'funny', p_text: 'What is the weirdest sound your stomach has made? #' + Date.now() });
 const fq = await rpc('api_family_questions', { p_code: code, p_token: P.Dad.token });
-ok(fq.length === 1 && fq[0].author === 'Gio', 'family question saved with author');
+ok(fq.some((q) => q.author === 'Gio' && q.text.startsWith('What is the weirdest sound')), 'family question saved with author');
 
 // refresh rejoin = same token works; reclaim on new device
 const re = await rpc('api_join_room', { p_code: code, p_name: 'Mom', p_reclaim: true });

@@ -1,7 +1,7 @@
 // GAME MODULE: Who Said It?
 // The engine calls render(ctx) to draw the round, and onAction(...) for taps
 // on elements with data-act="wsi:...". Game rules live in the database
-// (supabase/migrations/*_game_who_said_it.sql) so nobody can peek.
+// (db/migrations/002_game_who_said_it.sql) so nobody can peek.
 import bank from './questions.json';
 import { esc, vibrate } from '../../engine/ui.js';
 

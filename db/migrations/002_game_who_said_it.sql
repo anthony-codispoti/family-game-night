@@ -213,7 +213,3 @@ begin
   return v;
 end $$;
 
-revoke execute on function game_who_said_it_start(uuid), game_who_said_it_check(uuid),
-  game_who_said_it_items(uuid), game_who_said_it_score(uuid),
-  game_who_said_it_action(uuid,uuid,boolean,text,jsonb), game_who_said_it_view(uuid,uuid)
-  from public, anon, authenticated;

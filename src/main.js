@@ -1,6 +1,6 @@
 import './styles.css';
 import qrcode from 'qrcode-generator';
-import { configured, call, session, watchRoom, GameError } from './engine/api.js';
+import { call, session, watchRoom, GameError } from './engine/api.js';
 import { paint, esc, colorFor, toast, vibrate } from './engine/ui.js';
 import { GAMES, gameById } from './games/index.js';
 
@@ -104,7 +104,6 @@ async function engine(fn, args = {}) {
 // ------------------------------------------------------------ screens
 
 function render() {
-  if (!configured) return paint(app, setupNeeded());
   let html = '';
   if (S.view === 'home') html = home();
   else if (S.view === 'host') html = hostSetup();
@@ -114,12 +113,6 @@ function render() {
   if (S.overlay) html += overlay();
   paint(app, html);
   document.body.classList.toggle('busy', S.busy);
-}
-
-function setupNeeded() {
-  return `<div class="screen center pad"><h1 class="logo">Game Night</h1>
-    <p>This app isn't connected to its database yet.</p>
-    <p class="muted small">Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel → Settings → Environment Variables, then redeploy.</p></div>`;
 }
 
 function logo() {
@@ -487,7 +480,6 @@ document.addEventListener('keydown', (e) => {
 
 async function boot() {
   render();
-  if (!configured) return;
   call('api_roster').then((r) => { if (Array.isArray(r) && r.length) { S.roster = r; render(); } }).catch(() => {});
   const s = session.get();
   if (s) {

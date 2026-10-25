@@ -31,6 +31,14 @@ await tap('Dad', '[data-act="host:create"]');
 await P.Dad.locator('.lc-code').waitFor();
 const code = (await P.Dad.locator('.lc-code').innerText()).replace(/\s/g, '');
 ok(/^[A-Z]{4}$/.test(code), 'host created room ' + code);
+// fresh season so standings below only count this test
+await tap('Dad', '[data-act="menu:open"]');
+P.Dad.once('dialog', (d) => d.accept('Test Season'));
+await tap('Dad', '.sheet [data-act="season:new"]');
+await P.Dad.waitForTimeout(800);
+await tap('Dad', '.row [data-act="standings:open"]');
+ok((await P.Dad.locator('.sheet .season-name').innerText()).toUpperCase() === 'TEST SEASON', 'host started a new season');
+await tap('Dad', '.sheet-close');
 
 // Joiners: Mom & Gio via roster, Nonna as guest via link
 for (const n of ['Mom', 'Gio']) {
@@ -154,6 +162,36 @@ await tap('Dad', '[data-act="round:start"]');
 await P.Mom.locator('.qcard').waitFor();
 ok(await P.Mom.locator('.status-row .chip').count() === 3, 'round 2 has 3 players');
 await shot('Dad', '11-round2-host');
+
+// Round 2: play it all the way through with exactly 3 players, timing sync
+const three = ['Dad', 'Mom', 'Gio'];
+for (const n of three) { await P[n].fill('#wsi-answer', `round two from ${n}`); await tap(n, '[data-act="wsi:submit-answer"]'); }
+for (const n of three) await P[n].locator('.answer-card').first().waitFor();
+for (const n of three) {
+  const page = P[n];
+  const cards = await page.locator('.answer-card').all();
+  const btns = await page.locator('.name-btn').allInnerTexts();
+  ok(cards.length === 2 && btns.length === 2, `${n}: 2 answers, 2 names (3-player round)`);
+  for (let i = 0; i < cards.length; i++) { await cards[i].click(); await page.locator(`.name-btn:text-is("${btns[i]}")`).click(); }
+  await page.locator('[data-act="wsi:submit-guesses"]').click();
+}
+for (const n of three) await P[n].locator('.reveal-card').waitFor();
+const lags = [];
+for (let i = 0; i < 6; i++) {
+  const before = await P.Mom.locator('.reveal-card').innerText();
+  const t = Date.now();
+  await tap('Dad', '[data-act="wsi:next"]');
+  await P.Mom.waitForFunction((b) => { const el = document.querySelector('.reveal-card, .board-row'); return el && (el.closest('.board') || el.innerText !== b); }, before, { timeout: 8000 });
+  lags.push(Date.now() - t);
+}
+ok(Math.max(...lags) < 2000, `host tap shows on Mom's phone in ${lags.join(', ')} ms`);
+for (const n of three) await P[n].locator('.board-row').first().waitFor();
+const r2 = await P.Gio.locator('.board-row').count();
+ok(r2 === 3, 'round 2 results show 3 players');
+await tap('Dad', '[data-act="wsi:next"]');
+await P.Mom.locator('.season-name').waitFor();
+const season = await P.Mom.locator('.board-row').evaluateAll((els) => els.map((e) => e.querySelector('.bname').innerText + ':' + e.querySelector('.bdetail').innerText));
+ok(season.some((x) => x.startsWith('Dad:2 rounds')) && season.some((x) => x.startsWith('Nonna:1 round')), 'season standings add up across rounds: ' + season.join(' | '));
 console.log(`\nfinished in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 console.log(fails ? `${fails} FAILED` : 'ALL PASSED');
 await browser.close(); process.exit(fails ? 1 : 0);

@@ -3,18 +3,17 @@
 -- Rooms, players, rounds, private submissions, scoring, seasons, questions.
 --
 -- Security model:
---   * Every table has Row Level Security ON with NO policies, and the
---     public (anon) role has no table privileges. Nobody can read or write
---     tables directly from the browser.
---   * The browser can only call the "api_*" functions below. Each one
---     checks the room code + the player's secret device token, and only
---     returns what that player is allowed to see (e.g. never other
---     people's answers before the reveal).
+--   * The browser never talks to the database. It calls /api/rpc on
+--     Vercel, which may only run the "api_*" functions below (allow-list).
+--   * Each api_* function checks the room code + the player's secret
+--     device token, and only returns what that player is allowed to see
+--     (e.g. never other people's answers before the reveal).
+--   * Row Level Security is also ON for every table with no policies, so
+--     any database role other than the owner sees nothing.
 --   * Each game is a plug-in: SQL functions named game_<id>_start,
 --     game_<id>_action, game_<id>_view, game_<id>_check.
 -- =====================================================================
 
-create extension if not exists pgcrypto;
 
 -- ---------- tables ----------------------------------------------------
 
@@ -110,8 +109,10 @@ create table if not exists questions (
   active      boolean not null default true,
   used        boolean not null default false,
   times_used  int not null default 0,
+  last_pick   bigint,                     -- value of question_picks when last asked
   created_at  timestamptz not null default now()
 );
+create sequence if not exists question_picks;
 create unique index if not exists questions_game_text on questions (game, lower(text));
 
 -- ---------- lock everything down -------------------------------------
@@ -126,8 +127,6 @@ alter table submissions enable row level security;
 alter table scores      enable row level security;
 alter table questions   enable row level security;
 
-revoke all on seasons, roster, games, rooms, players, rounds, submissions, scores, questions
-  from anon, authenticated;
 
 -- ---------- seed data -------------------------------------------------
 
@@ -142,18 +141,11 @@ begin
   raise exception using message = msg, errcode = 'P0001';
 end $$;
 
--- Bump room version and ping every device in the room (Realtime broadcast).
+-- Bump the room's version number; devices watching the room notice and refresh.
 create or replace function _touch(p_room uuid) returns void
 language plpgsql security definer set search_path = public as $$
-declare v_code text; v_ver bigint;
 begin
-  update rooms set version = version + 1, updated_at = now()
-   where id = p_room returning code, version into v_code, v_ver;
-  begin
-    perform realtime.send(jsonb_build_object('v', v_ver), 'changed', 'room-' || v_code, false);
-  exception when others then
-    null; -- realtime not available: devices fall back to polling
-  end;
+  update rooms set version = version + 1, updated_at = now() where id = p_room;
 end $$;
 
 -- Find the caller's player row from room code + secret token.
@@ -193,37 +185,43 @@ begin
   return c;
 end $$;
 
--- Pick the next question for a game. Bank and family questions each cycle
--- separately: nothing repeats until its pool is used up. Family-written
--- questions get ~40% of picks, so they come up more often.
+-- Pick the next question for a game.
+--   * Bank questions: nothing repeats until the whole bank has been used.
+--   * Family-written questions jump the line (~40% of picks while one is
+--     available), but a family question can't come back until at least
+--     20 other questions have been asked since it was last used.
 create or replace function _pick_question(p_game text, p_exclude bigint default null) returns questions
 language plpgsql security definer set search_path = public as $$
-declare q questions; v_src text;
+declare q questions; v_seq bigint := nextval('question_picks');
 begin
-  if exists (select 1 from questions where game = p_game and active and source = 'family')
-     and random() < 0.4 then
-    v_src := 'family';
-  else
-    v_src := 'bank';
-  end if;
-  if not exists (select 1 from questions where game = p_game and active and source = v_src) then
-    v_src := case when v_src = 'bank' then 'family' else 'bank' end;
-  end if;
-
-  if not exists (select 1 from questions where game = p_game and active and source = v_src
-                  and not used and id is distinct from p_exclude) then
-    update questions set used = false where game = p_game and source = v_src;  -- start a new cycle
+  if random() < 0.4 then
+    if not exists (select 1 from questions where game = p_game and active and source = 'family'
+                    and not used and id is distinct from p_exclude) then
+      update questions set used = false
+       where game = p_game and source = 'family' and used and coalesce(last_pick, 0) < v_seq - 20;
+    end if;
+    select * into q from questions
+     where game = p_game and active and source = 'family' and not used and id is distinct from p_exclude
+     order by random() limit 1;
   end if;
 
-  select * into q from questions
-   where game = p_game and active and source = v_src and not used and id is distinct from p_exclude
-   order by random() limit 1;
-  if not found then
-    select * into q from questions where game = p_game and active order by random() limit 1;
+  if q.id is null then
+    if not exists (select 1 from questions where game = p_game and active and source = 'bank'
+                    and not used and id is distinct from p_exclude) then
+      update questions set used = false where game = p_game and source = 'bank';  -- new cycle
+    end if;
+    select * into q from questions
+     where game = p_game and active and source = 'bank' and not used and id is distinct from p_exclude
+     order by random() limit 1;
   end if;
-  if not found then perform _err('NO_QUESTIONS'); end if;
 
-  update questions set used = true, times_used = times_used + 1 where id = q.id;
+  if q.id is null then
+    select * into q from questions where game = p_game and active and id is distinct from p_exclude
+     order by coalesce(last_pick, 0) limit 1;
+  end if;
+  if q.id is null then perform _err('NO_QUESTIONS'); end if;
+
+  update questions set used = true, times_used = times_used + 1, last_pick = v_seq where id = q.id;
   return q;
 end $$;
 
@@ -512,18 +510,3 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
--- ---------- permissions on functions ---------------------------------
-
-revoke execute on all functions in schema public from public, anon, authenticated;
-grant execute on function
-  api_roster(), api_create_room(text,text,jsonb), api_join_room(text,text,boolean),
-  api_state(text,uuid), api_version(text), api_start_round(text,uuid),
-  api_action(text,uuid,text,jsonb), api_cancel_round(text,uuid),
-  api_remove_player(text,uuid,uuid), api_leave_room(text,uuid), api_make_host(text,uuid,uuid),
-  api_new_season(text,uuid,text), api_past_seasons(text,uuid),
-  api_add_question(text,uuid,text,text), api_family_questions(text,uuid),
-  api_delete_question(text,uuid,bigint)
-to anon, authenticated;
-
--- New functions (e.g. future games) are NOT callable by the browser unless granted explicitly.
-alter default privileges in schema public revoke execute on functions from public, anon, authenticated;

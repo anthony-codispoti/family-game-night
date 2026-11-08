@@ -20,6 +20,7 @@ const API = {
   api_add_question: [['p_code', T], ['p_token', U], ['p_category', T], ['p_text', T]],
   api_family_questions: [['p_code', T], ['p_token', U]],
   api_delete_question: [['p_code', T], ['p_token', U], ['p_id', N]],
+  api_room_setting: [['p_code', T], ['p_token', U], ['p_key', T], ['p_value', J]],
 };
 
 async function callApi(fn, args = {}) {

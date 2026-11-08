@@ -21,6 +21,10 @@ const ERRORS = {
   NO_DATABASE: "The database isn't connected yet (Vercel → Storage → Neon).",
   SERVER_ERROR: 'The server hiccuped. Try again.',
   OFFLINE: 'You seem to be offline.',
+  ANSWER_REQUIRED: 'Type an answer first!',
+  BAD_SETTING: "That setting isn't allowed.",
+  UNKNOWN_PLAYER: "That player isn't in this round.",
+  NO_QUESTIONS: 'Out of cards! Ask the host to reload.',
 };
 export class GameError extends Error {
   constructor(code) { super(ERRORS[code] || code); this.code = code; }

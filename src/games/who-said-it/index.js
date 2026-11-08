@@ -201,13 +201,17 @@ function reveal(ctx, g) {
   if (g.author_shown && item.author) {
     const author = ctx.player(item.author);
     const guesses = item.guesses || {};
-    const right = Object.entries(guesses).filter(([, pid]) => pid === item.author).map(([gid]) => gid);
-    const wrong = Object.entries(guesses).filter(([, pid]) => pid !== item.author);
+    // someone else wrote the same answer: guessing them counts too
+    const twins = item.twins || [];
+    const counts = (pid) => pid === item.author || twins.includes(pid);
+    const right = Object.entries(guesses).filter(([, pid]) => counts(pid)).map(([gid]) => gid);
+    const wrong = Object.entries(guesses).filter(([, pid]) => !counts(pid));
     who = `
       <div class="author-reveal" style="--c:${author.color}">
         <div class="said-by">said by</div>
         <div class="author-name">${esc(author.name)}</div>
       </div>
+      ${twins.length ? `<div class="twins">👯 ${twins.map((id) => esc(ctx.player(id).name)).join(' & ')} wrote the same thing, so guessing ${twins.length === 1 ? 'either name' : 'any of them'} counts!</div>` : ''}
       <div class="guess-results">
         <div class="gr-row"><span class="gr-label good">Got it right</span>
           <span>${right.length ? right.map((id) => `<span class="chip done" style="--c:${ctx.player(id).color}">✓ ${esc(ctx.player(id).name)} +1</span>`).join('') : '<span class="muted">Nobody! 😱</span>'}</span></div>

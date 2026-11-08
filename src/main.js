@@ -206,6 +206,7 @@ function lobby(game) {
       <div class="lc-url">Join at <b>${esc(location.host)}</b></div>
     </div>
     <div class="game-banner"><b>${esc(game.name)}</b><span>${esc(game.tagline)}</span></div>
+    ${game.lobbyExtra ? game.lobbyExtra(gameCtx()) : ''}
     <div class="section-title">Players <span class="count">${n}</span></div>
     <div class="player-list">
       ${r.players.map((p) => `<div class="player-row" style="--c:${colorFor(p.seat)}">
@@ -219,7 +220,7 @@ function lobby(game) {
       ? `<button class="btn primary huge sticky-cta" data-act="round:start" ${n < min || S.busy ? 'disabled' : ''}>${n < min ? `Need ${min} players` : "Everyone's in — Start! ▶"}</button>`
       : `<div class="waiting-host">Waiting for ${esc(host()?.name || 'the host')} to start…</div>`}
     <div class="row gap wrap center-row">
-      <button class="btn ghost" data-act="addq:open">✍️ Add a question</button>
+      ${game.allowAddQuestions === false ? '' : '<button class="btn ghost" data-act="addq:open">✍️ Add a question</button>'}
       <button class="btn ghost" data-act="standings:open">🏆 Standings</button>
     </div>
     ${isHost() ? `<details class="qr"><summary>Show QR code to join</summary><div class="qr-box">${qrSvg(joinUrl())}</div></details>` : ''}`;
@@ -228,6 +229,7 @@ function lobby(game) {
 function standingsScreen({ title = 'Season Standings', next = false } = {}) {
   const r = S.room;
   const rows = r.standings || [];
+  const wins = gameById(r.room.game).showWins;
   const medals = ['🥇', '🥈', '🥉'];
   return `
     <h1 class="screen-title">${esc(title)}</h1>
@@ -235,7 +237,7 @@ function standingsScreen({ title = 'Season Standings', next = false } = {}) {
     <div class="board">
       ${rows.length ? rows.map((s, i) => `<div class="board-row ${i === 0 ? 'winner' : ''}" style="--c:${playerByName(s.name).color}">
         <span class="rank">${medals[i] || i + 1}</span><span class="bname">${esc(s.name)}</span>
-        <span class="bdetail">${s.rounds} round${s.rounds === 1 ? '' : 's'}</span><span class="bpoints">${s.points}</span></div>`).join('')
+        <span class="bdetail">${wins ? `${s.wins} win${s.wins === 1 ? '' : 's'} · ` : ''}${s.rounds} round${s.rounds === 1 ? '' : 's'}</span><span class="bpoints">${s.points}</span></div>`).join('')
         : '<div class="muted center pad">No points yet this season.</div>'}
     </div>
     ${next ? (isHost()
@@ -250,6 +252,7 @@ function gameCtx() {
     isHost: isHost(),
     player, playerByName,
     act, toast, rerender: render,
+    setting: (key, value) => engine('api_room_setting', { p_key: key, p_value: value }),
     standingsScreen,
     hostButton(label, action) {
       return isHost()
@@ -277,10 +280,11 @@ function sheet(inner) {
 function menuSheet() {
   const r = S.room;
   const inRound = r.round && !r.round.finished;
+  const game = gameById(r.room.game);
   return sheet(`
     <h2>Room ${esc(r.room.code)}</h2>
     <div class="menu-list">
-      <button class="menu-item" data-act="addq:open">✍️ Add a question</button>
+      ${game.allowAddQuestions === false ? '' : '<button class="menu-item" data-act="addq:open">✍️ Add a question</button>'}
       <button class="menu-item" data-act="standings:open">🏆 Season standings</button>
     </div>
     ${isHost() ? `
@@ -399,7 +403,8 @@ const handlers = {
     const s = session.get();
     const past = await call('api_past_seasons', { p_code: s.code, p_token: s.token }).catch(() => []);
     const box = document.getElementById('past-seasons');
-    if (box) box.innerHTML = past.length ? past.map((p) => `<div class="past"><b>${esc(p.name)}</b> — ${p.standings.map((x, i) => `${i === 0 ? '👑 ' : ''}${esc(x.name)} ${x.points}`).join(' · ') || 'no points'}</div>`).join('') : '<p class="muted small">No past seasons yet.</p>';
+    const wins = gameById(S.room.room.game).showWins;
+    if (box) box.innerHTML = past.length ? past.map((p) => `<div class="past"><b>${esc(p.name)}</b> — ${p.standings.map((x, i) => `${i === 0 ? '👑 ' : ''}${esc(x.name)} ${wins ? `${x.wins}W ${x.points}pts` : x.points}`).join(' · ') || 'no points'}</div>`).join('') : '<p class="muted small">No past seasons yet.</p>';
   },
 
   'round:start': () => engine('api_start_round'),
@@ -472,6 +477,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter' || e.shiftKey) return;
   const id = e.target.id;
   if (id === 'wsi-answer') { e.preventDefault(); document.querySelector('[data-act="wsi:submit-answer"]')?.click(); }
+  if (e.target.dataset?.enter) { e.preventDefault(); document.querySelector(`[data-act="${e.target.dataset.enter}"]`)?.click(); }
   if (id === 'join-code' || (id === 'custom-name' && S.view === 'join')) { e.preventDefault(); join(false); }
   if (id === 'custom-name' && S.view === 'host') { e.preventDefault(); handlers['host:create'](); }
 });

@@ -2,7 +2,9 @@
 
 A party game app for playing together in the same room, each person on their own phone, iPad, or laptop. No accounts or logins.
 
-**First game: Who Said It?** Everyone secretly answers a question, then everyone guesses who wrote each answer.
+**Games:**
+- **Who Said It?** Everyone secretly answers a question, then everyone guesses who wrote each answer.
+- **Blank Slate.** A card shows a word with a blank (SNOW ___). Everyone secretly writes one word to fill it in.
 
 ## How to play (for the family)
 
@@ -14,6 +16,17 @@ A party game app for playing together in the same room, each person on their own
 6. **The reveal.** The host taps through each answer. Everyone shouts guesses, then the host reveals who said it. The author tells the story behind the answer.
 7. **Points:** +1 for each answer you match correctly. +1 for each person who guessed wrong on your answer.
 8. Season standings carry over between game nights. The host can start a new season from the ☰ menu.
+
+**Same answers in Who Said It?** If two people write the same thing (or nearly: "pizza" / "Pizzas!", small typos), guessing either name counts as right.
+
+### Blank Slate
+1. Host picks **15, 25 or 35 points** in the lobby (25 is the official game).
+2. Each card: everyone types one word and locks it in. The host can skip a card.
+3. The host reveals the answers one group at a time. Words count as the same even with different capital letters, plurals ("dog"/"dogs"), spaces ("ice cream"/"icecream"), or the card word added ("snowman" on SNOW ___).
+4. **Host check:** possible typos show up as "Same word? basball & baseball". The host taps **Yes, same** or **No**. The host can also tap a name and choose **Same as this** or **Split off**.
+5. **Points:** match exactly one other person = **+3** each. Three or more people = **+1** each. Nobody matches you = 0.
+6. First to the target wins. Tied at the top past the target? One more card. The race track shows everyone's progress; 🔥 means within 5 points.
+7. Blank Slate has its own season leaderboard (wins, then points).
 
 **Tips**
 - Refreshing or closing the page is fine. Reopen it and you're back in.
@@ -42,11 +55,16 @@ src/
   games/who-said-it/
     index.js              Who Said It? screens
     questions.json        question bank (edit freely)
+  games/blank-slate/
+    index.js              Blank Slate screens + race track
+    cards.json            card deck ("snow ___", "___ ball"; edit freely)
 db/
   migrations/             database: engine + one file per game (applied automatically)
 tests/
   api-flow.mjs            full round through the database API + security checks
+  blank-slate-flow.mjs    Blank Slate scoring/matching + Who Said It? same-answer rule
   e2e.mjs                 4 simulated phones play full rounds in real browsers
+  e2e-blank-slate.mjs     4 simulated phones play Blank Slate
   local-server.mjs        local stand-in for Vercel (uses plain Postgres)
 ```
 

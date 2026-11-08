@@ -5,8 +5,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test:api": "node tests/api-flow.mjs",
-    "test:e2e": "node tests/e2e.mjs",
+    "test:api": "node tests/api-flow.mjs && node tests/blank-slate-flow.mjs",
+    "test:e2e": "node tests/e2e.mjs && node tests/e2e-blank-slate.mjs",
     "serve:local": "node tests/local-server.mjs",
     "test": "bash tests/run-all.sh"
   },

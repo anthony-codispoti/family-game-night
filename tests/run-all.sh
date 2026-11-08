@@ -8,4 +8,7 @@ node tests/local-server.mjs > /tmp/fgn-server.log 2>&1 & SERVER=$!
 trap "kill $SERVER" EXIT
 sleep 1
 node tests/api-flow.mjs
-PW_PATH=${PW_PATH:-$(npm root -g)/playwright} node tests/e2e.mjs
+node tests/blank-slate-flow.mjs
+export PW_PATH=${PW_PATH:-$(npm root -g)/playwright}
+node tests/e2e.mjs
+node tests/e2e-blank-slate.mjs

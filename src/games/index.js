@@ -3,9 +3,11 @@
 //   2. add its SQL module in db/migrations + api/_lib/db.js MIGRATIONS (game_<id>_start/_action/_view/_check)
 //   3. import it below with a short unique prefix for its button actions
 import whoSaidIt from './who-said-it/index.js';
+import blankSlate from './blank-slate/index.js';
 
 export const GAMES = [
   { ...whoSaidIt, prefix: 'wsi' },
+  { ...blankSlate, prefix: 'bs' },
 ];
 
 export const gameById = (id) => GAMES.find((g) => g.id === id) || GAMES[0];

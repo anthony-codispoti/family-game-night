@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Applied in order, once each. To change the database, add a new file here.
-const MIGRATIONS = ['001_engine.sql', '002_game_who_said_it.sql'];
+const MIGRATIONS = ['001_engine.sql', '002_game_who_said_it.sql', '003_answer_matching.sql', '004_game_blank_slate.sql'];
 const migrationSql = (name) => fs.readFileSync(path.join(__dirname, '..', '..', 'db', 'migrations', name), 'utf8');
 
 let db = null;
